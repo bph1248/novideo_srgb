@@ -31,6 +31,12 @@ namespace novideo_srgb
             _startupValue = Application.ExecutablePath + " -minimize";
 
             UpdateMonitors();
+
+            var args = Environment.GetCommandLineArgs();
+            if (args.Contains("--silent"))
+            {
+                Environment.Exit(0);
+            }
         }
 
         public bool? RunAtStartup
