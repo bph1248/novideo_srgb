@@ -1,4 +1,4 @@
-## [Download latest release](https://github.com/ledoge/novideo_srgb/releases/latest/download/release.zip)
+This branch adds a new command-line arg: --silent. When called with this arg, novideo_srgb will apply its config and exit without displaying a GUI.
 
 # About
 This tool uses an undocumented NVIDIA API, supported on Fermi and later, to convert colors before sending them to a wide gamut monitor to effectively clamp it to sRGB (alternatively: Display P3, Adobe RGB or BT.2020), based on the chromaticities provided in its EDID. AMD supports this as a hidden setting in their drivers, but NVIDIA doesn't because ???.
@@ -8,7 +8,7 @@ ICC profiles are also supported and can be used in two different ways. By defaul
 # Usage
 Extract `release.zip` somewhere under your user directory and run `novideo_srgb.exe`. To enable/disable the sRGB clamp for a monitor, simply toggle the "Clamped" checkbox. For using ICC profiles and configuring dithering, click the "Advanced" button.
 
-Generally, the clamp should persist through reboots and driver updates, but it can break sometimes. You can choose to leave the application running minimized in the background to have it automatically reapply the clamp and also handle HDR toggling – see the section "HDR and automatic reapplying" below. 
+Generally, the clamp should persist through reboots and driver updates, but it can break sometimes. You can choose to leave the application running minimized in the background to have it automatically reapply the clamp and also handle HDR toggling – see the section "HDR and automatic reapplying" below.
 
 # Notes for use with EDID data
 * If the checkbox for a monitor is locked, it means that the EDID is reporting the sRGB primaries as the monitor's primaries, so the monitor is either natively sRGB or uses an sRGB emulation mode by default. If this is not the case, complain to the manufacturer about the EDID being wrong, and try to find an ICC profile for your monitor to use instead of the EDID data.
