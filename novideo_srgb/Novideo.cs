@@ -1,10 +1,9 @@
-﻿using System;
-using System.Linq;
-using System.Runtime.InteropServices;
-using EDIDParser;
+﻿using EDIDParser;
 using Microsoft.Win32;
 using NvAPIWrapper.Display;
-using NvAPIWrapper.GPU;
+using System;
+using System.Linq;
+using System.Runtime.InteropServices;
 
 /*
 no NDAs violated here!
@@ -103,9 +102,9 @@ namespace novideo_srgb
             public float[,] matrix2;
         }
 
-        public static ColorSpaceConversion GetColorSpaceConversion(GPUOutput output)
+        public static ColorSpaceConversion GetColorSpaceConversion(uint display_id)
         {
-            var displayId = output.PhysicalGPU.GetDisplayDeviceByOutput(output).DisplayId;
+            var displayId = display_id;
 
             var csc = new Csc { version = 0x1007C };
             var status = NvAPI_GPU_GetColorSpaceConversion(displayId, ref csc);
@@ -143,9 +142,9 @@ namespace novideo_srgb
             return result;
         }
 
-        public static void SetColorSpaceConversion(GPUOutput output, ColorSpaceConversion conversion)
+        public static void SetColorSpaceConversion(uint display_id, ColorSpaceConversion conversion)
         {
-            var displayId = output.PhysicalGPU.GetDisplayDeviceByOutput(output).DisplayId;
+            var displayId = display_id;
 
             var csc = new Csc
             {
@@ -182,12 +181,12 @@ namespace novideo_srgb
             }
         }
 
-        public static void SetColorSpaceConversion(GPUOutput output, Matrix matrix)
+        public static void SetColorSpaceConversion(uint display_id, Matrix matrix)
         {
-            SetColorSpaceConversion(output, MatrixToColorSpaceConversion(matrix));
+            SetColorSpaceConversion(display_id, MatrixToColorSpaceConversion(matrix));
         }
 
-        public static unsafe void SetColorSpaceConversion(GPUOutput output, ICCMatrixProfile profile,
+        public static unsafe void SetColorSpaceConversion(uint display_id, ICCMatrixProfile profile,
             Colorimetry.ColorSpace target,
             ToneCurve curve = null,
             bool disableOptimization = false)
@@ -196,11 +195,11 @@ namespace novideo_srgb
 
             if (curve == null)
             {
-                SetColorSpaceConversion(output, MatrixToColorSpaceConversion(matrix));
+                SetColorSpaceConversion(display_id, MatrixToColorSpaceConversion(matrix));
                 return;
             }
 
-            var displayId = output.PhysicalGPU.GetDisplayDeviceByOutput(output).DisplayId;
+            var displayId = display_id;
             var gamma = new float[2, 1024, 3];
             fixed (float* buffer = gamma)
             {
@@ -281,9 +280,9 @@ namespace novideo_srgb
             }
         }
 
-        public static bool IsColorSpaceConversionActive(GPUOutput output)
+        public static bool IsColorSpaceConversionActive(uint display_id)
         {
-            var csc = GetColorSpaceConversion(output);
+            var csc = GetColorSpaceConversion(display_id);
             switch (csc.monitorColorSpace)
             {
                 // default GPU driver state or explicitly disabled
@@ -296,9 +295,9 @@ namespace novideo_srgb
             }
         }
 
-        public static void DisableColorSpaceConversion(GPUOutput output)
+        public static void DisableColorSpaceConversion(uint display_id)
         {
-            SetColorSpaceConversion(output, new ColorSpaceConversion { contentColorSpace = 2 });
+            SetColorSpaceConversion(display_id, new ColorSpaceConversion { contentColorSpace = 2 });
         }
 
         public static EDID GetEDID(string path, Display display)
@@ -331,29 +330,6 @@ namespace novideo_srgb
             }
 
             return csc;
-        }
-
-        public static DitherControl GetDitherControl(GPUOutput output)
-        {
-            var dither = new Dither
-                { version = 0x10018 };
-            var status = NvAPI_GPU_GetDitherControl(output.PhysicalGPU.GetDisplayDeviceByOutput(output).DisplayId,
-                ref dither);
-            if (status != 0)
-            {
-                throw new Exception("NvAPI_GPU_GetDitherControl failed with error code " + status);
-            }
-
-            return dither.ditherControl;
-        }
-
-        public static void SetDitherControl(GPUOutput output, int state, int bits, int mode)
-        {
-            var status = NvAPI_GPU_SetDitherControl(output.PhysicalGPU.GPUId, (uint)output.OutputId, state, bits, mode);
-            if (status != 0)
-            {
-                throw new Exception("NvAPI_GPU_SetDitherControl failed with error code " + status);
-            }
         }
 
         static Novideo()

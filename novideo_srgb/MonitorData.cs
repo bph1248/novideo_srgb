@@ -1,62 +1,28 @@
-﻿using System;
-using System.ComponentModel;
-using System.Linq;
-using System.Runtime.CompilerServices;
-using System.Threading;
-using System.Windows;
-using EDIDParser;
-using EDIDParser.Descriptors;
-using EDIDParser.Enums;
+﻿using EDIDParser;
 using NvAPIWrapper.Display;
-using NvAPIWrapper.GPU;
-using NvAPIWrapper.Native.Display;
+using System;
 
 namespace novideo_srgb
 {
-    public class MonitorData : INotifyPropertyChanged
+    public class MonitorData
     {
-        public event PropertyChangedEventHandler PropertyChanged;
+        public uint DisplayId { get; }
+        public bool EnableClamp { get; }
+        public Colorimetry.ColorSpace ColorSpaceTarget { get; }
+        public PrimariesSource PrimariesSource { get; }
+        public EDID Edid { get; }
+        public Colorimetry.ColorSpace EdidColorSpace { get; }
+        public string ProfilePath { get; }
+        public bool CalibrateGamma { get; }
+        public GammaTarget GammaTarget { get; }
+        public double GammaValue { get; }
+        public double BlackOutputOffset { get; }
+        public bool DisableOptimization { get; }
 
-        private readonly GPUOutput _output;
-        private bool _clamped;
-        private int _bitDepth;
-        private Novideo.DitherControl _dither;
-
-        private MainViewModel _viewModel;
-
-        public MonitorData(MainViewModel viewModel, int number, Display display, string path, bool hdrActive, bool clampSdr)
+        public MonitorData(Display display, string display_path)
         {
-            _viewModel = viewModel;
-            Number = number;
-            _output = display.Output;
-
-            _bitDepth = 0;
-            try
-            {
-                var bitDepth = display.DisplayDevice.CurrentColorData.ColorDepth;
-                if (bitDepth == ColorDataDepth.BPC6)
-                    _bitDepth = 6;
-                else if (bitDepth == ColorDataDepth.BPC8)
-                    _bitDepth = 8;
-                else if (bitDepth == ColorDataDepth.BPC10)
-                    _bitDepth = 10;
-                else if (bitDepth == ColorDataDepth.BPC12)
-                    _bitDepth = 12;
-                else if (bitDepth == ColorDataDepth.BPC16)
-                    _bitDepth = 16;
-            }
-            catch (Exception)
-            {
-            }
-
-            Edid = Novideo.GetEDID(path, display);
-
-            Name = Edid.Descriptors.OfType<StringDescriptor>()
-                .FirstOrDefault(x => x.Type == StringDescriptorType.MonitorName)?.Value ?? "<no name>";
-
-            Path = path;
-            ClampSdr = clampSdr;
-            HdrActive = hdrActive;
+            DisplayId = display.DisplayDevice.DisplayId;
+            Edid = Novideo.GetEDID(display_path, display);
 
             var coords = Edid.DisplayParameters.ChromaticityCoordinates;
             EdidColorSpace = new Colorimetry.ColorSpace
@@ -66,215 +32,83 @@ namespace novideo_srgb
                 Blue = new Colorimetry.Point { X = Math.Round(coords.BlueX, 3), Y = Math.Round(coords.BlueY, 3) },
                 White = Colorimetry.D65
             };
-
-            _dither = Novideo.GetDitherControl(_output);
-            _clamped = Novideo.IsColorSpaceConversionActive(_output);
-
-            ProfilePath = "";
-            CustomGamma = 2.2;
-            CustomPercentage = 100;
         }
 
-        public MonitorData(MainViewModel viewModel, int number, Display display, string path, bool hdrActive, bool clampSdr, bool useIcc, string profilePath,
-            bool calibrateGamma,
-            int selectedGamma, double customGamma, double customPercentage, int target, bool disableOptimization) :
-            this(viewModel, number, display, path, hdrActive, clampSdr)
+        public MonitorData(
+            Display display,
+            string display_path,
+            bool enable_clamp,
+            int color_space_target,
+            PrimariesSource primaries_source,
+            string profile_path,
+            bool calibrate_gamma,
+            GammaTarget gamma_target,
+            double gamma_value,
+            double black_output_offset,
+            bool disable_optimization
+        ) : this(display, display_path)
         {
-            UseIcc = useIcc;
-            ProfilePath = profilePath;
-            CalibrateGamma = calibrateGamma;
-            SelectedGamma = selectedGamma;
-            CustomGamma = customGamma;
-            CustomPercentage = customPercentage;
-            Target = target;
-            DisableOptimization = disableOptimization;
+            EnableClamp = enable_clamp;
+            ColorSpaceTarget = Colorimetry.ColorSpaces[color_space_target];
+            PrimariesSource = primaries_source;
+            ProfilePath = profile_path;
+            CalibrateGamma = calibrate_gamma;
+            GammaTarget = gamma_target;
+            GammaValue = gamma_value;
+            BlackOutputOffset = black_output_offset;
+            DisableOptimization = disable_optimization;
         }
 
-        public int Number { get; }
-        public string Name { get; }
-        public EDID Edid { get; }
-        public string Path { get; }
-        public bool ClampSdr { get; set; }
-        public bool HdrActive { get; }
-
-        private void UpdateClamp(bool doClamp)
+        public void UpdateClamp()
         {
-            if (_clamped)
+            if (!EnableClamp)
             {
-                Novideo.DisableColorSpaceConversion(_output);
+                Novideo.DisableColorSpaceConversion(DisplayId);
+
+                return;
             }
 
-            if (!doClamp) return;
-
-            if (_clamped) Thread.Sleep(100);
-            if (UseEdid)
-                Novideo.SetColorSpaceConversion(_output, Colorimetry.RGBToRGB(TargetColorSpace, EdidColorSpace));
-            else if (UseIcc)
+            switch (PrimariesSource)
             {
-                var profile = ICCMatrixProfile.FromFile(ProfilePath);
-                if (CalibrateGamma)
-                {
-                    var trcBlack = Matrix.FromValues(new[,]
-                    {
-                        { profile.trcs[0].SampleAt(0) },
-                        { profile.trcs[1].SampleAt(0) },
-                        { profile.trcs[2].SampleAt(0) }
-                    });
-                    var black = (profile.matrix * trcBlack)[1];
+                case PrimariesSource.Edid:
+                    Novideo.SetColorSpaceConversion(DisplayId, Colorimetry.RGBToRGB(ColorSpaceTarget, EdidColorSpace));
 
-                    ToneCurve gamma;
-                    switch (SelectedGamma)
+                    return;
+                case PrimariesSource.Profile:
+                    var profile = ICCMatrixProfile.FromFile(ProfilePath);
+
+                    if (CalibrateGamma)
                     {
-                        case 0:
-                            gamma = new SrgbEOTF(black);
-                            break;
-                        case 1:
-                            gamma = new GammaToneCurve(2.4, black, 0);
-                            break;
-                        case 2:
-                            gamma = new GammaToneCurve(CustomGamma, black, CustomPercentage / 100);
-                            break;
-                        case 3:
-                            gamma = new GammaToneCurve(CustomGamma, black, CustomPercentage / 100, true);
-                            break;
-                        case 4:
-                            gamma = new LstarEOTF(black);
-                            break;
-                        default:
-                            throw new NotSupportedException("Unsupported gamma type " + SelectedGamma);
+                        var trcBlack = Matrix.FromValues(new[,]
+                            {
+                                { profile.trcs[0].SampleAt(0) },
+                                { profile.trcs[1].SampleAt(0) },
+                                { profile.trcs[2].SampleAt(0) }
+                            }
+                        );
+                        var black = (profile.matrix * trcBlack)[1];
+
+                        ToneCurve tone_curve = GammaTarget switch
+                        {
+                            GammaTarget.Srgb => new SrgbEOTF(black),
+                            GammaTarget.Bt1886 => new GammaToneCurve(2.4, black, 0),
+                            GammaTarget.CustomAbsolute => new GammaToneCurve(GammaValue, black, BlackOutputOffset / 100),
+                            GammaTarget.CustomRelative => new GammaToneCurve(GammaValue, black, BlackOutputOffset / 100, true),
+                            GammaTarget.Lstar => new LstarEOTF(black),
+                            _ => throw new NotSupportedException("Unsupported gamma target: " + GammaTarget)
+                        };
+
+                        Novideo.SetColorSpaceConversion(DisplayId, profile, ColorSpaceTarget, tone_curve, DisableOptimization);
+                    }
+                    else
+                    {
+                        Novideo.SetColorSpaceConversion(DisplayId, profile, ColorSpaceTarget);
                     }
 
-                    Novideo.SetColorSpaceConversion(_output, profile, TargetColorSpace, gamma, DisableOptimization);
-                }
-                else
-                {
-                    Novideo.SetColorSpaceConversion(_output, profile, TargetColorSpace);
-                }
+                    break;
+                default:
+                    throw new NotSupportedException("Unsupported primaries source: " + PrimariesSource);
             }
-        }
-
-        private void HandleClampException(Exception e)
-        {
-            MessageBox.Show(e.Message);
-            _clamped = Novideo.IsColorSpaceConversionActive(_output);
-            ClampSdr = _clamped;
-            _viewModel.SaveConfig();
-            OnPropertyChanged(nameof(Clamped));
-        }
-        
-        public bool Clamped
-        {
-            set
-            {
-                try
-                {
-                    UpdateClamp(value);
-                    ClampSdr = value;
-                    _viewModel.SaveConfig();
-                }
-                catch (Exception e)
-                {
-                    HandleClampException(e);
-                    return;
-                }
-
-                _clamped = value;
-                OnPropertyChanged();
-            }
-            get => _clamped;
-        }
-
-        public void ReapplyClamp()
-        {
-            try
-            {
-                var clamped = CanClamp && ClampSdr;
-                UpdateClamp(clamped);
-                _clamped = clamped;
-                OnPropertyChanged(nameof(CanClamp));
-            }
-            catch (Exception e)
-            {
-                HandleClampException(e);
-            }
-        }
-
-        public bool CanClamp => !HdrActive && (UseEdid && !EdidColorSpace.Equals(TargetColorSpace) || UseIcc && ProfilePath != "");
-
-        public string GPU => _output.PhysicalGPU.FullName;
-
-        public bool UseEdid
-        {
-            set => UseIcc = !value;
-            get => !UseIcc;
-        }
-
-        public bool UseIcc { set; get; }
-
-        public string ProfilePath { set; get; }
-
-        public bool CalibrateGamma { set; get; }
-
-        public int SelectedGamma { set; get; }
-
-        public double CustomGamma { set; get; }
-
-        public double CustomPercentage { set; get; }
-
-        public bool DisableOptimization { set; get; }
-
-        public int Target { set; get; }
-
-        public Colorimetry.ColorSpace EdidColorSpace { get; }
-
-        private Colorimetry.ColorSpace TargetColorSpace => Colorimetry.ColorSpaces[Target];
-
-        public Novideo.DitherControl DitherControl => _dither;
-
-        public string DitherString
-        {
-            get
-            {
-                string[] types =
-                {
-                    "SpatialDynamic",
-                    "SpatialStatic",
-                    "SpatialDynamic2x2",
-                    "SpatialStatic2x2",
-                    "Temporal"
-                };
-                if (_dither.state == 2)
-                {
-                    return "Disabled (forced)";
-                }
-                if (_dither.state == 0 & _dither.bits == 0 && _dither.mode == 0)
-                {
-                    return "Disabled (default)";
-                }
-                var bits = (6 + 2 * _dither.bits).ToString();
-                return bits + " bit " + types[_dither.mode] + " (" + (_dither.state == 0 ? "default" : "forced") + ")";
-            }
-        }
-
-        public int BitDepth => _bitDepth;
-
-        public void ApplyDither(int state, int bits, int mode)
-        {
-            try
-            {
-                Novideo.SetDitherControl(_output, state, bits, mode);
-                _dither = Novideo.GetDitherControl(_output);
-                OnPropertyChanged(nameof(DitherString));
-            }
-            catch (Exception e)
-            {
-                MessageBox.Show(e.Message);
-            }
-        }
-
-        private void OnPropertyChanged([CallerMemberName] string name = null)
-        {
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
         }
     }
 }
