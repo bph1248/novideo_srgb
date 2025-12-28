@@ -61,10 +61,10 @@ namespace novideo_srgb
 
         public void UpdateClamp()
         {
+            Novideo.DisableColorSpaceConversion(DisplayId);
+
             if (!EnableClamp)
             {
-                Novideo.DisableColorSpaceConversion(DisplayId);
-
                 return;
             }
 
